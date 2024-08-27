@@ -2,11 +2,11 @@
 
 /*
  * Code Attribution:
- * Custom Attributes
- * tdykstra
- * 9 September 2023
- * learn.microsoft.com
- * https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation?view=aspnetcore-6.0#custom-attributes
+ * Add server side validation for uploaded files
+ * muhammadelhelaly
+ * 26 August 2023
+ * GitHub
+ * https://github.com/muhammadelhelaly/GameZone/blob/master/GameZone/Attributes/AllowedExtensionsAttribute.cs
  */
 namespace BasicEcom.Attributes
 {
