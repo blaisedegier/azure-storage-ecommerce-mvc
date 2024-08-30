@@ -79,7 +79,7 @@ namespace BasicEcom.Services
                                 header.Cell().Element(CellStyle).Text("Size").FontSize(12).Bold().FontColor(Colors.White);
                                 header.Cell().Element(CellStyle).Text("Quantity").FontSize(12).Bold().FontColor(Colors.White);
                                 header.Cell().Element(CellStyle).Text("Color").FontSize(12).Bold().FontColor(Colors.White);
-                            }).Background(Colors.Blue.Darken3);
+                            });
 
                             // Data Row
                             table.Cell().Element(CellStyle).Text(invoice.ProductName);
