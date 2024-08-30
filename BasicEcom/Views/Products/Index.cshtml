@@ -1,0 +1,78 @@
+﻿@model IEnumerable<BasicEcom.Models.Products>
+
+@{
+    ViewData["Title"] = "Products";
+    var viewType = Context.Session.GetString("viewType") ?? "card"; // Default to card view
+}
+
+<h2>@ViewData["Title"]</h2>
+
+@if (Context.Session.GetString("isAdmin") == "True")
+{
+    <form asp-action="Index" method="post" class="mb-3">
+        <input type="hidden" name="viewType" value="@(viewType == "card" ? "table" : "card")" />
+        <button type="submit" class="btn btn-info">Switch to @(viewType == "card" ? "Table" : "Card") View</button>
+    </form>
+}
+
+@if (viewType == "card")
+{
+    <div class="row">
+        @foreach (var product in Model)
+        {
+            <div class="col-md-6">
+                <div class="card" style="width: 22rem;">
+                    <img src="@product.ImageUrl" class="card-img-top product-image">
+                    <div class="card-body">
+                        <h5 class="card-title">@product.Name</h5>
+                        <p class="card-text">@($"R{product.Price}")</p>
+
+                        <div class="dropdown">
+                            <button class="btn btn-secondary dropdown-toggle" type="button" id="dropdownMenuButton@product.ProductId" data-bs-toggle="dropdown" aria-expanded="false">
+                                Product Description
+                            </button>
+                            <ul class="dropdown-menu" aria-labelledby="dropdownMenuButton@product.ProductId">
+                                <li><a class="dropdown-item text-wrap">@product.Description</a></li>
+                            </ul>
+                        </div>
+
+                        <a asp-action="CreateOrder" asp-route-PartitionKey="@product.PartitionKey" asp-route-RowKey="@product.RowKey" class="btn btn-primary mt-2">Order</a>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+else if (viewType == "table")
+{
+    <form asp-action="Index" method="post">
+        <a asp-action="Create" class="btn btn-primary">Create New Product</a>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Description</th>
+                    <th>Price</th>
+                    <th>Image</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model)
+                {
+                    <tr>
+                        <td>@item.Name</td>
+                        <td>@item.Description</td>
+                        <td>@($"R{item.Price}")</td>
+                        <td><img src="@item.ImageUrl" class="img-thumbnail" style="max-width: 100px;" /></td>
+                        <td>
+                            <a asp-action="Edit" asp-route-partitionKey="@item.PartitionKey" asp-route-rowKey="@item.RowKey" class="btn btn-warning">Edit</a>
+                            <a asp-action="Details" asp-route-partitionKey="@item.PartitionKey" asp-route-rowKey="@item.RowKey" class="btn btn-info">Details</a>
+                            <a asp-action="Delete" asp-route-partitionKey="@item.PartitionKey" asp-route-rowKey="@item.RowKey" class="btn btn-danger">Delete</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </form>
+}
