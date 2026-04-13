@@ -1,4 +1,4 @@
-# 🛒 Sneaker Store — Azure-Powered E-Commerce Web App
+# Sneaker Store - Azure-Powered E-Commerce Web App 🛒
 
 A server-rendered e-commerce application built with **ASP.NET Core 8 MVC** and **Azure Storage** services. The app demonstrates cloud storage patterns by using Azure Table, Blob, Queue, and File Share storage as its sole persistence layer- no traditional relational database required.
 
