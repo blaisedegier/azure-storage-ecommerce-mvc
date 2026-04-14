@@ -81,26 +81,28 @@ A server-rendered e-commerce application built with **ASP.NET Core 8 MVC** and *
 
 ```text
 BasicEcom/
-├── BasicEcom.sln        # Visual Studio solution
+├── BasicEcom.sln                   # Visual Studio solution
 ├── .gitignore
 ├── .gitattributes
-└── BasicEcom/           # Main web project
-    ├── Program.cs                        # App startup, DI, middleware
-    ├── appsettings.json                  # Azure Storage configuration
-    ├── BasicEcom.csproj  # .NET 8 project file
-    ├── libman.json                       # Client-side library manager
+├── .github/
+│   └── workflows/                  # CI/CD workflow definitions
+└── BasicEcom/                      # Main web project
+    ├── Program.cs                  # App startup, DI, middleware
+    ├── appsettings.json            # Azure Storage configuration
+    ├── BasicEcom.csproj            # .NET 8 project file
+    ├── libman.json                 # Client-side library manager
     │
     ├── Controllers/
-    │   ├── HomeController.cs             # Home & About pages
-    │   ├── ProductsController.cs         # Product CRUD + checkout flow
-    │   ├── CustomersController.cs        # Registration, login, admin CRUD
-    │   └── OrdersController.cs           # Order management
+    │   ├── HomeController.cs       # Home & About pages
+    │   ├── ProductsController.cs   # Product CRUD + checkout flow
+    │   ├── CustomersController.cs  # Registration, login, admin CRUD
+    │   └── OrdersController.cs     # Order management
     │
     ├── Models/
-    │   ├── Customers.cs                  # Azure Table entity
-    │   ├── Products.cs                   # Azure Table entity
-    │   ├── Orders.cs                     # Azure Table entity
-    │   └── Invoice.cs                    # DTO for PDF generation
+    │   ├── Customers.cs            # Azure Table entity
+    │   ├── Products.cs             # Azure Table entity
+    │   ├── Orders.cs               # Azure Table entity
+    │   └── Invoice.cs              # DTO for PDF generation
     │
     ├── ViewModels/
     │   ├── RegisterViewModel.cs
@@ -109,31 +111,31 @@ BasicEcom/
     │   └── ErrorViewModel.cs
     │
     ├── Services/
-    │   ├── TableService.cs               # Azure Table CRUD operations
-    │   ├── BlobService.cs                # Image upload/delete to Blob
-    │   ├── QueueService.cs               # Message publishing to Queue
-    │   ├── FileService.cs                # File Share upload/download
-    │   └── PdfGeneratorService.cs        # QuestPDF invoice generation
+    │   ├── TableService.cs         # Azure Table CRUD operations
+    │   ├── BlobService.cs          # Image upload/delete to Blob
+    │   ├── QueueService.cs         # Message publishing to Queue
+    │   ├── FileService.cs          # File Share upload/download
+    │   └── PdfGeneratorService.cs  # QuestPDF invoice generation
     │
     ├── Attributes/
     │   ├── AuthorizeAdminAttribute.cs    # Admin-only action filter
     │   └── AllowedExtensionsAttribute.cs # File upload validation
     │
-    ├── Views/                            # Razor views
+    ├── Views/                      # Razor views
     │   ├── Home/
     │   ├── Products/
     │   ├── Customers/
     │   ├── Orders/
     │   └── Shared/
-    │       └── _Layout.cshtml            # Main layout template
+    │       └── _Layout.cshtml      # Main layout template
     │
-    ├── wwwroot/                          # Static assets
+    ├── wwwroot/                    # Static assets
     │   ├── css/
     │   ├── js/
-    │   └── lib/                          # Bootstrap, jQuery
+    │   └── lib/                    # Bootstrap, jQuery
     │
     └── Properties/
-        └── launchSettings.json           # Dev server URLs
+        └── launchSettings.json     # Dev server URLs
 ```
 
 ---
@@ -237,7 +239,7 @@ The app uses a **custom session-based authentication** system (not ASP.NET Core 
 - **Route protection:** The `AdminAuthorizeAttribute` action filter checks the session for admin status by loading the customer entity from Azure Table Storage
 - **UI guards:** Navigation links for Customers and Orders are conditionally rendered based on admin session state
 
-### User flows
+### User Flows
 
 | Flow             | Access     | Description                               |
 | ---------------- | ---------- | ----------------------------------------- |
