@@ -2,40 +2,35 @@
 using Microsoft.AspNetCore.Mvc.Filters;
 using BasicEcom.Services;
 
-/*
- * Code Attribution:
- * Add a custom action filter in ASP.NET Core
- * Maclain Wiltzer
- * 19 May 2024
- * makolyte
- * https://makolyte.com/aspdotnet-core-how-to-add-your-own-action-filter/
- */
 namespace BasicEcom.Attributes
 {
-    // This class is used to authorize the user as an admin.
+    // Allows the action only for a signed-in customer whose stored record has isAdmin set. The flag is
+    // re-read from Table Storage on every request, so revoking it takes effect immediately.
+    // Adapted from https://makolyte.com/aspdotnet-core-how-to-add-your-own-action-filter/
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-    public class AdminAuthorizeAttribute : ActionFilterAttribute
+    public class AdminAuthorizeAttribute : Attribute, IAsyncActionFilter
     {
-        public override void OnActionExecuting(ActionExecutingContext context)
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            var tableService = (TableService)context.HttpContext.RequestServices.GetService(typeof(TableService))!;
-            var partitionKey = context.HttpContext.Session.GetString("PartitionKey");
-            var rowKey = context.HttpContext.Session.GetString("RowKey");
+            var session = context.HttpContext.Session;
+            var partitionKey = session.GetString("PartitionKey");
+            var rowKey = session.GetString("RowKey");
 
             if (string.IsNullOrEmpty(partitionKey) || string.IsNullOrEmpty(rowKey))
             {
-                context.Result = new UnauthorizedResult();
+                context.Result = new RedirectToActionResult("Login", "Customers", null);
                 return;
             }
 
-            var customer = tableService.GetCustomerAsync(partitionKey, rowKey).Result;
+            var tableService = context.HttpContext.RequestServices.GetRequiredService<TableService>();
+            var customer = await tableService.FindCustomerAsync(partitionKey, rowKey);
             if (customer == null || !customer.isAdmin)
             {
-                context.Result = new ForbidResult();
+                context.Result = new StatusCodeResult(StatusCodes.Status403Forbidden);
                 return;
             }
 
-            base.OnActionExecuting(context);
+            await next();
         }
     }
 }

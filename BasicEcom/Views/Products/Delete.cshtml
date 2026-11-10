@@ -33,7 +33,7 @@
             @Html.DisplayNameFor(model => model.ImageUrl)
         </dt>
         <dd class="col-sm-10">
-            <img src="@Model.ImageUrl" class="img-fluid" />
+            <img src="@Url.Action("Image", new { partitionKey = Model.PartitionKey, rowKey = Model.RowKey })" class="img-fluid" alt="@Model.Name" />
         </dd>
     </dl>
 </div>

@@ -1,5 +1,4 @@
-﻿using BasicEcom.Models;
-using QuestPDF;
+using BasicEcom.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -7,27 +6,12 @@ using QuestPDF.Infrastructure;
 namespace BasicEcom.Services
 {
     // This class is responsible for generating PDF documents using the QuestPDF library.
-    /*
-     * Code Attribution:
-     * QuestPDF
-     * MarcinZiabek
-     * 28 August 2024
-     * GitHub
-     * https://github.com/QuestPDF/QuestPDF
-     */
+    // Adapted from https://github.com/QuestPDF/QuestPDF
     public class PdfGeneratorService
     {
-        /*
-         * Code Attribution:
-         * Getting Started
-         * n.d.
-         * QuestPDF
-         * https://www.questpdf.com/getting-started.html
-         */
+        // Adapted from https://www.questpdf.com/getting-started.html
         public byte[] GenerateInvoicePdf(Invoice invoice)
         {
-            Settings.License = LicenseType.Community;
-
             var document = Document.Create(container =>
             {
                 container.Page(page =>
@@ -84,14 +68,14 @@ namespace BasicEcom.Services
                             // Data Row
                             table.Cell().Element(CellStyle).Text(invoice.ProductName);
                             table.Cell().Element(CellStyle).Text(invoice.Description);
-                            table.Cell().Element(CellStyle).AlignRight().Text(invoice.Price.ToString("C"));
+                            table.Cell().Element(CellStyle).AlignRight().Text(FormatRand(invoice.Price));
                             table.Cell().Element(CellStyle).AlignCenter().Text(invoice.Size.ToString());
                             table.Cell().Element(CellStyle).AlignCenter().Text(invoice.Quantity.ToString());
                             table.Cell().Element(CellStyle).Text(invoice.Colour);
                         });
 
                         // Total Amount Section
-                        column.Item().AlignRight().PaddingTop(10).Text($"Total: {invoice.TotalAmount:C}").FontSize(16).Bold().FontColor(Colors.Green.Darken2);
+                        column.Item().AlignRight().PaddingTop(10).Text($"Total: {FormatRand(invoice.TotalAmount)}").FontSize(16).Bold().FontColor(Colors.Green.Darken2);
                     });
 
                     page.Footer().AlignCenter().Padding(5)
@@ -101,6 +85,10 @@ namespace BasicEcom.Services
 
             return document.GeneratePdf();
         }
+
+        // Prices are rand amounts; format them explicitly so the invoice does not depend on the server's culture.
+        private static string FormatRand(double amount) =>
+            "R" + amount.ToString("N2", System.Globalization.CultureInfo.InvariantCulture);
 
         private IContainer CellStyle(IContainer container)
         {

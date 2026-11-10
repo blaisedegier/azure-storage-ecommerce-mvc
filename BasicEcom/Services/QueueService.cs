@@ -8,14 +8,7 @@ namespace BasicEcom.Services
     // This class is responsible for enqueuing messages to the Azure Queue Storage
     public class QueueService
     {
-        /*
-         * Code Attribution:
-         * Using Azure Storage Queues In .NET
-         * Vincent Nyanga
-         * n.d.
-         * Hones Dev
-         * https://honesdev.com/using-azure-storage-queues-in-dotnet/
-         */
+        // Adapted from https://honesdev.com/using-azure-storage-queues-in-dotnet/
         private readonly QueueClient _queueClient;
 
         public QueueService(string connectionString, string queueName)

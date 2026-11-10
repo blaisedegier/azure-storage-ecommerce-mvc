@@ -1,11 +1,10 @@
-﻿using Azure;
+using Azure;
 using Azure.Data.Tables;
-using BasicEcom.Attributes;
 using System.ComponentModel.DataAnnotations;
 
 namespace BasicEcom.Models
 {
-    // This class is used to create the Orders table in the Azure Table Storage
+    // A product row in the products table
     public class Products : ITableEntity
     {
         // ITableEntity
@@ -26,7 +25,7 @@ namespace BasicEcom.Models
         [Required, Range(0.0, double.MaxValue, ErrorMessage = "Invalid Price")]
         public double Price { get; set; }
 
-        [DataType(DataType.ImageUrl), AllowedExtensions(new[] { ".jpg", ".png" })]
+        // Name of the product image in the blob container, or null when there is no image.
         public string? ImageUrl { get; set; }
     }
 }

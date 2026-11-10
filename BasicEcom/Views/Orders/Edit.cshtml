@@ -11,6 +11,8 @@
 <div class="row">
     <div class="col-md-4">
         <form asp-action="Edit">
+            <input type="hidden" asp-for="PartitionKey" />
+            <input type="hidden" asp-for="RowKey" />
             <div class="form-group">
                 <label asp-for="CustomerID" class="control-label"></label>
                 <input asp-for="CustomerID" class="form-control" />

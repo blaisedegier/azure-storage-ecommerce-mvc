@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>BasicEcom</RootNamespace>
+    <UserSecretsId>1d6c1f0e-6a1b-4c39-9a0e-3f5b7d2c8e41</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,10 +1,18 @@
+using BasicEcom.Models;
 using BasicEcom.Services;
+using Microsoft.AspNetCore.Mvc;
+using QuestPDF.Infrastructure;
+
+// QuestPDF's Community licence is free for individuals, non-profits and businesses under USD 1M annual
+// revenue; see https://www.questpdf.com/license/.
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllersWithViews();
+// Every POST must carry the antiforgery token that the form tag helper emits.
+builder.Services.AddControllersWithViews(options =>
+    options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
 
-// Add session services
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(options =>
 {
@@ -13,53 +21,24 @@ builder.Services.AddSession(options =>
     options.Cookie.IsEssential = true;
 });
 
-// Register TableService with Dependency Injection
-builder.Services.AddSingleton<TableService>(provider =>
-{
-    var configuration = provider.GetRequiredService<IConfiguration>();
-    string connectionString = configuration["AzureStorage:ConnectionString"]!;
-    string customersTableName = configuration["AzureStorage:CustomersTableName"]!;
-    string productsTableName = configuration["AzureStorage:ProductsTableName"]!;
-    string ordersTableName = configuration["AzureStorage:OrdersTableName"]!;
+// One instance of each storage service for the app's lifetime: the SDK clients are thread-safe, and
+// creating them once means the tables, container, queue and share are checked once at first use
+// rather than on every request.
+var storage = builder.Configuration.GetSection("AzureStorage");
+string Require(string key) => storage[key]
+    ?? throw new InvalidOperationException($"AzureStorage:{key} is not configured.");
 
-    return new TableService(connectionString, customersTableName, productsTableName, ordersTableName);
-});
-
-// Register QueueService with Dependency Injection
-builder.Services.AddSingleton<QueueService>(provider =>
-{
-    var configuration = provider.GetRequiredService<IConfiguration>();
-    string connectionString = configuration["AzureStorage:ConnectionString"] ?? throw new ArgumentNullException(nameof(configuration), "AzureStorage:ConnectionString is not configured.");
-    string queueName = configuration["AzureStorage:QueueName"] ?? throw new ArgumentNullException(nameof(configuration), "AzureStorage:QueueName is not configured.");
-
-    return new QueueService(connectionString, queueName);
-});
-
-// Register BlobService with Dependency Injection
-builder.Services.AddSingleton<BlobService>(provider =>
-{
-    var configuration = provider.GetRequiredService<IConfiguration>();
-    string connectionString = configuration["AzureStorage:ConnectionString"] ?? throw new ArgumentNullException(nameof(configuration), "AzureStorage:ConnectionString is not configured.");
-    string blobContainerName = configuration["AzureStorage:BlobContainerName"] ?? throw new ArgumentNullException(nameof(configuration), "AzureStorage:BlobContainerName is not configured.");
-
-    return new BlobService(connectionString, blobContainerName);
-});
-
-// Register FileService with Dependency Injection
-builder.Services.AddSingleton<FileService>(provider =>
-{
-    var configuration = provider.GetRequiredService<IConfiguration>();
-
-    string connectionString = configuration["AzureStorage:ConnectionString"] ?? throw new ArgumentNullException(nameof(configuration), "AzureStorage:ConnectionString is not configured.");
-    string shareName = configuration["AzureStorage:ShareName"] ?? throw new ArgumentNullException(nameof(configuration), "AzureStorage:ShareName is not configured.");
-
-    return new FileService(connectionString, shareName);
-});
-
-// Register PdfGeneratorService with Dependency Injection
+builder.Services.AddSingleton(_ => new TableService(
+    Require("ConnectionString"), Require("CustomersTableName"), Require("ProductsTableName"), Require("OrdersTableName")));
+builder.Services.AddSingleton(_ => new QueueService(Require("ConnectionString"), Require("QueueName")));
+builder.Services.AddSingleton(_ => new BlobService(Require("ConnectionString"), Require("BlobContainerName")));
+builder.Services.AddSingleton(provider => new FileService(
+    Require("ConnectionString"), Require("FileShareName"), provider.GetRequiredService<ILogger<FileService>>()));
 builder.Services.AddSingleton<PdfGeneratorService>();
 
 var app = builder.Build();
+
+await SeedAdminAsync(app.Services, app.Configuration, app.Logger);
 
 if (!app.Environment.IsDevelopment())
 {
@@ -72,13 +51,44 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
-// Enable session management
 app.UseSession();
-
-app.UseAuthorization();
 
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
+
+// Creates an admin customer from the SeedAdmin settings when a password is configured and no customer
+// with that email exists yet.
+static async Task SeedAdminAsync(IServiceProvider services, IConfiguration configuration, ILogger logger)
+{
+    var seed = configuration.GetSection("SeedAdmin");
+    var email = seed["Email"];
+    var password = seed["Password"];
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+    {
+        logger.LogInformation("SeedAdmin:Password is not set, so no admin account was created.");
+        return;
+    }
+
+    var tableService = services.GetRequiredService<TableService>();
+    if (await tableService.FindCustomerByEmailAsync(email) != null)
+    {
+        return;
+    }
+
+    var admin = new Customers
+    {
+        PartitionKey = "Customer",
+        RowKey = Guid.NewGuid().ToString(),
+        CustomerID = "ADMIN",
+        Name = seed["Name"] ?? "Store Admin",
+        Email = email,
+        Phone = seed["Phone"] ?? "0000000000",
+        isAdmin = true
+    };
+    admin.PasswordHash = TableService.HashPassword(admin, password);
+    await tableService.AddCustomerAsync(admin);
+    logger.LogInformation("Created admin account {Email}.", email);
+}

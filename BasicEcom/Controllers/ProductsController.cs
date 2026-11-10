@@ -8,65 +8,56 @@ namespace BasicEcom.Controllers
 {
     public class ProductsController : Controller
     {
-        // Services
         private readonly TableService _tableService;
         private readonly QueueService _queueService;
         private readonly BlobService _blobService;
         private readonly FileService _fileService;
         private readonly PdfGeneratorService _pdfGeneratorService;
+        private readonly ILogger<ProductsController> _logger;
 
-        public ProductsController(IConfiguration configuration)
+        public ProductsController(
+            TableService tableService,
+            QueueService queueService,
+            BlobService blobService,
+            FileService fileService,
+            PdfGeneratorService pdfGeneratorService,
+            ILogger<ProductsController> logger)
         {
-            // Get the connection string from the configuration
-            string connectionString = configuration["AzureStorage:ConnectionString"]!;
-
-            // Get the table names from the configuration and create the TableService
-            string customersTableName = configuration["AzureStorage:CustomersTableName"]!;
-            string productsTableName = configuration["AzureStorage:ProductsTableName"]!;
-            string ordersTableName = configuration["AzureStorage:OrdersTableName"]!;
-            _tableService = new TableService(connectionString, customersTableName, productsTableName, ordersTableName);
-
-            // Get the queue name from the configuration and create the QueueService
-            string queueName = configuration["AzureStorage:QueueName"]!;
-            _queueService = new QueueService(connectionString, queueName);
-
-            // Get the blob container name from the configuration and create the BlobService
-            string containerName = configuration["AzureStorage:BlobContainerName"]!;
-            _blobService = new BlobService(connectionString, containerName);
-
-            // Get the file share name from the configuration and create the FileService
-            string shareName = configuration["AzureStorage:FileShareName"]!;
-            _fileService = new FileService(connectionString, shareName);
-
-            // Create the PdfGeneratorService
-            _pdfGeneratorService = new PdfGeneratorService();
+            _tableService = tableService;
+            _queueService = queueService;
+            _blobService = blobService;
+            _fileService = fileService;
+            _pdfGeneratorService = pdfGeneratorService;
+            _logger = logger;
         }
 
         // GET: Products
         public async Task<IActionResult> Index()
         {
-            // Get the products from the table storage
-            string filter = string.Empty;
-            var products = await _tableService.QueryProductsAsync(filter).ConfigureAwait(false);
-
-            // Return the view with the products sorted by name
+            var products = await _tableService.QueryProductsAsync();
             return View(products.OrderBy(p => p.Name));
         }
 
-        // POST: Products
+        // POST: Products (switches an admin between the card and table views)
         [HttpPost]
         [AdminAuthorize]
-        public async Task<IActionResult> Index(string viewType)
+        public IActionResult Index(string viewType)
         {
-            // Store the viewType in the session
-            HttpContext.Session.SetString("viewType", viewType);
+            HttpContext.Session.SetString("viewType", viewType == "table" ? "table" : "card");
+            return RedirectToAction(nameof(Index));
+        }
 
-            // Get the products from the table storage
-            string filter = string.Empty;
-            var products = await _tableService.QueryProductsAsync(filter).ConfigureAwait(false);
+        // GET: Products/Image - streams a product image from the private blob container.
+        public async Task<IActionResult> Image(string partitionKey, string rowKey)
+        {
+            var product = await _tableService.FindProductAsync(partitionKey, rowKey);
+            if (string.IsNullOrEmpty(product?.ImageUrl))
+            {
+                return NotFound();
+            }
 
-            // Return the view with the products sorted by name
-            return View(products.OrderBy(p => p.Name));
+            var blob = await _blobService.DownloadBlobAsync(product.ImageUrl);
+            return blob == null ? NotFound() : File(blob.Value.Content, blob.Value.ContentType);
         }
 
         #region CRUD Operations
@@ -74,40 +65,38 @@ namespace BasicEcom.Controllers
         [AdminAuthorize]
         public IActionResult Create()
         {
-            // Return the view
             return View();
         }
 
         // POST: Products/Create
         [HttpPost]
         [AdminAuthorize]
-        public async Task<IActionResult> Create([Bind("PartitionKey,RowKey,ProductID,Name,Description,Price,ImageUrl")] Products product, IFormFile imageFile)
+        public async Task<IActionResult> Create([Bind("ProductID,Name,Description,Price")] Products product,
+            [AllowedExtensions(new[] { ".jpg", ".jpeg", ".png" })] IFormFile? imageFile)
         {
-            // Check if the model is valid and return the view if not
             if (!ModelState.IsValid)
             {
                 return View(product);
             }
 
-            // Upload the image file to the blob storage
+            product.PartitionKey = "Sneaker";
+            product.RowKey = Guid.NewGuid().ToString();
+            product.ProductID ??= product.RowKey;
+
+            // The image is stored under a generated name; ImageUrl holds that blob name.
             if (imageFile != null && imageFile.Length > 0)
             {
-                string blobName = product.Name!;
+                string blobName = $"{product.RowKey}{Path.GetExtension(imageFile.FileName).ToLowerInvariant()}";
                 using (var stream = imageFile.OpenReadStream())
                 {
-                    await _blobService.UploadBlobAsync(blobName, stream).ConfigureAwait(false);
+                    await _blobService.UploadBlobAsync(blobName, stream, imageFile.ContentType);
                 }
-                product.ImageUrl = _blobService.GetBlobUrl(blobName);
+                product.ImageUrl = blobName;
             }
 
-            // Add the product to the table storage
-            product.PartitionKey = "Sneaker";
-            await _tableService.AddProductAsync(product).ConfigureAwait(false);
+            await _tableService.AddProductAsync(product);
+            await _queueService.EnqueueMessageAsync(new { TableName = "Products", Action = "Create", Description = $"Product {product.Name} created." });
 
-            // Enqueue a message to the queue
-            await _queueService.EnqueueMessageAsync(new { TableName = "Products", Action = "Create", Description = $"Order {product.Name} created." }).ConfigureAwait(false);
-
-            // Redirect to the index view
             return RedirectToAction(nameof(Index));
         }
 
@@ -115,10 +104,7 @@ namespace BasicEcom.Controllers
         [AdminAuthorize]
         public async Task<IActionResult> Details(string partitionKey, string rowKey)
         {
-            // Get the product from the table storage
-            var product = await _tableService.GetProductAsync(partitionKey, rowKey).ConfigureAwait(false);
-
-            // Return NotFound if the product is null or the view with the product
+            var product = await _tableService.FindProductAsync(partitionKey, rowKey);
             return product == null ? NotFound() : View(product);
         }
 
@@ -126,37 +112,38 @@ namespace BasicEcom.Controllers
         [AdminAuthorize]
         public async Task<IActionResult> Edit(string partitionKey, string rowKey)
         {
-            // Get the product from the table storage
-            var product = await _tableService.GetProductAsync(partitionKey, rowKey).ConfigureAwait(false);
-
-            // Return NotFound if the product is null or the view with the product
+            var product = await _tableService.FindProductAsync(partitionKey, rowKey);
             return product == null ? NotFound() : View(product);
         }
 
         // POST: Products/Edit
         [HttpPost]
         [AdminAuthorize]
-        public async Task<IActionResult> Edit(string partitionKey, string rowKey, [Bind("PartitionKey,RowKey,ProductID,Name,Description,Price,ImageUrl")] Products product)
+        public async Task<IActionResult> Edit(string partitionKey, string rowKey, [Bind("PartitionKey,RowKey,Name,Description,Price")] Products input)
         {
-            // Check if the partitionKey and rowKey match the product and return BadRequest if not
-            if (partitionKey != product.PartitionKey || rowKey != product.RowKey)
+            if (partitionKey != input.PartitionKey || rowKey != input.RowKey)
             {
                 return NotFound();
             }
 
-            // Check if the model is valid and return the view if not
             if (!ModelState.IsValid)
             {
-                return View(product);
+                return View(input);
             }
 
-            // Upload the image file to the blob storage
-            await _tableService.UpdateProductAsync(product).ConfigureAwait(false);
+            var product = await _tableService.FindProductAsync(partitionKey, rowKey);
+            if (product == null)
+            {
+                return NotFound();
+            }
 
-            // Enqueue a message to the queue
-            await _queueService.EnqueueMessageAsync(new { TableName = "Products", Action = "Update", Description = $"Order {product.Name} updated." }).ConfigureAwait(false);
+            product.Name = input.Name;
+            product.Description = input.Description;
+            product.Price = input.Price;
 
-            // Redirect to the index view
+            await _tableService.UpdateProductAsync(product);
+            await _queueService.EnqueueMessageAsync(new { TableName = "Products", Action = "Update", Description = $"Product {product.Name} updated." });
+
             return RedirectToAction(nameof(Index));
         }
 
@@ -164,95 +151,72 @@ namespace BasicEcom.Controllers
         [AdminAuthorize]
         public async Task<IActionResult> Delete(string partitionKey, string rowKey)
         {
-            // Get the product from the table storage
-            var product = await _tableService.GetProductAsync(partitionKey, rowKey).ConfigureAwait(false);
-
-            // Return NotFound if the product is null or the view with the product
+            var product = await _tableService.FindProductAsync(partitionKey, rowKey);
             return product == null ? NotFound() : View(product);
         }
 
-        // POST: Products/Delete
-        [HttpPost, ActionName("DeleteConfirmed")]
+        // POST: Products/DeleteConfirmed
+        [HttpPost]
         [AdminAuthorize]
         public async Task<IActionResult> DeleteConfirmed(string partitionKey, string rowKey)
         {
-            // Get the product from the table storage
-            var product = await _tableService.GetProductAsync(partitionKey, rowKey).ConfigureAwait(false);
-
-            // Delete the product from the table storage
-            if (product != null && !string.IsNullOrEmpty(product.ImageUrl))
+            var product = await _tableService.FindProductAsync(partitionKey, rowKey);
+            if (product == null)
             {
-                var blobName = new Uri(product.ImageUrl).Segments.Last();
-                await _blobService.DeleteBlobAsync(blobName).ConfigureAwait(false);
+                return NotFound();
             }
 
-            // Enqueue a message to the queue
-            await _queueService.EnqueueMessageAsync(new { TableName = "Products", Action = "Delete", Description = $"Order {product!.Name} deleted." }).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(product.ImageUrl))
+            {
+                await _blobService.DeleteBlobAsync(product.ImageUrl);
+            }
 
-            // Delete the product from the table storage
-            await _tableService.DeleteProductAsync(partitionKey, rowKey).ConfigureAwait(false);
+            await _tableService.DeleteProductAsync(partitionKey, rowKey);
+            await _queueService.EnqueueMessageAsync(new { TableName = "Products", Action = "Delete", Description = $"Product {product.Name} deleted." });
 
-            // Redirect to the index view
             return RedirectToAction(nameof(Index));
         }
         #endregion
 
         #region Order
         // GET: Products/CreateOrder
-        public IActionResult CreateOrder(string PartitionKey, string RowKey)
+        public IActionResult CreateOrder(string partitionKey, string rowKey)
         {
-            // Check if the session token is null or empty and redirect to the login view if it is
-            var sessionToken = HttpContext.Session.GetString("SessionToken");
-            if (string.IsNullOrEmpty(sessionToken))
+            if (string.IsNullOrEmpty(HttpContext.Session.GetString("SessionToken")))
             {
                 return RedirectToAction("Login", "Customers");
             }
 
-            // Return the view with the order view model
-            var orderVM = new OrderViewModel { ProductPartitionKey = PartitionKey, ProductRowKey = RowKey };
-            return View(orderVM);
+            return View(new OrderViewModel { ProductPartitionKey = partitionKey, ProductRowKey = rowKey });
         }
 
-        // POST: Products/CreateOrder
-        /*
-         * Code Attribution:
-         * ViewModels in ASP.NET MVC applications - This is how it works
-         * tutorialsEU - C#
-         * 10 February 2023
-         * YouTube
-         * https://www.youtube.com/watch?v=NfUccG5faBQ
-         */
+        // POST: Products/CreateOrder - stores the order and returns its invoice as a PDF download.
+        // Adapted from https://www.youtube.com/watch?v=NfUccG5faBQ
         [HttpPost]
         public async Task<IActionResult> CreateOrder([Bind("ProductPartitionKey,ProductRowKey,Size,Quantity,Colour")] OrderViewModel orderVM)
         {
-            // Check if the model is valid and return the view if not
+            var customerPartitionKey = HttpContext.Session.GetString("PartitionKey");
+            var customerRowKey = HttpContext.Session.GetString("RowKey");
+            if (string.IsNullOrEmpty(customerPartitionKey) || string.IsNullOrEmpty(customerRowKey))
+            {
+                return RedirectToAction("Login", "Customers");
+            }
+
             if (!ModelState.IsValid)
             {
                 return View(orderVM);
             }
 
-            // Get the customer partition key and row key from the session and return NotFound if they are null or empty
-            var customerPartitionKey = HttpContext.Session.GetString("PartitionKey");
-            var customerRowKey = HttpContext.Session.GetString("RowKey");
-            if (string.IsNullOrEmpty(customerPartitionKey) || string.IsNullOrEmpty(customerRowKey))
+            var customer = await _tableService.FindCustomerAsync(customerPartitionKey, customerRowKey);
+            var product = await _tableService.FindProductAsync(orderVM.ProductPartitionKey ?? "", orderVM.ProductRowKey ?? "");
+            if (customer == null || product == null)
             {
                 return NotFound();
             }
 
-            // Get the customer from the table storage and return NotFound if it is null
-            var customer = await _tableService.GetCustomerAsync(customerPartitionKey, customerRowKey).ConfigureAwait(false);
-            if (customer == null)
-            {
-                return NotFound();
-            }
-
-            // Get the product from the table storage
-            var product = await _tableService.GetProductAsync(orderVM.ProductPartitionKey!, orderVM.ProductRowKey!).ConfigureAwait(false);
-
-            // Create the order and add it to the table storage
             var order = new Orders
             {
-                PartitionKey = Guid.NewGuid().ToString(),
+                PartitionKey = "Orders",
                 RowKey = Guid.NewGuid().ToString(),
                 OrderID = Guid.NewGuid().ToString(),
                 CustomerID = customer.CustomerID,
@@ -261,12 +225,9 @@ namespace BasicEcom.Controllers
                 Quantity = orderVM.Quantity,
                 Colour = orderVM.Colour
             };
-            await _tableService.AddOrderAsync(order).ConfigureAwait(false);
+            await _tableService.AddOrderAsync(order);
+            await _queueService.EnqueueMessageAsync(new { TableName = "Orders", Action = "Create", Description = $"Order {order.OrderID} created." });
 
-            // Enqueue a message to the queue
-            await _queueService.EnqueueMessageAsync(new { TableName = "Orders", Action = "Create", Description = $"Order {order.OrderID} created." }).ConfigureAwait(false);
-
-            // Create the invoice
             var invoice = new Invoice
             {
                 CustomerName = customer.Name,
@@ -281,34 +242,21 @@ namespace BasicEcom.Controllers
                 Quantity = order.Quantity,
                 Colour = order.Colour
             };
-
-            // Generate the invoice PDF
             byte[] pdfBytes = _pdfGeneratorService.GenerateInvoicePdf(invoice);
+            string fileName = $"invoice-{order.OrderID}.pdf";
 
-            string directoryName = customerPartitionKey;
-            string fileName = $"{customer.Name}_{product.Name}_Invoice.pdf";
+            // Keep a copy in the customer's directory on the file share. The download does not depend on it.
             try
             {
-                // Upload the PDF file to the file share
-                using (var stream = new MemoryStream(pdfBytes))
-                {
-                    await _fileService.UploadFileAsync(directoryName, fileName, stream).ConfigureAwait(false);
-                }
-
-                // Download the PDF file from the file share, check if it is null and return BadRequest if it is
-                var fileStream = await _fileService.DownloadFileAsync(directoryName, fileName).ConfigureAwait(false);
-                if (fileStream == null)
-                {
-                    return BadRequest();
-                }
-
-                // Return the PDF file
-                return File(fileStream, "application/pdf", fileName);
+                using var stream = new MemoryStream(pdfBytes);
+                await _fileService.UploadFileAsync(customer.RowKey!, fileName, stream);
             }
-            catch
+            catch (Exception ex)
             {
-                return BadRequest();
+                _logger.LogError(ex, "Archiving invoice {FileName} failed.", fileName);
             }
+
+            return File(pdfBytes, "application/pdf", fileName);
         }
         #endregion
     }

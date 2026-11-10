@@ -1,378 +1,186 @@
-﻿using Azure;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Azure;
 using Azure.Data.Tables;
 using BasicEcom.Models;
-using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
+using Microsoft.AspNetCore.Identity;
 
 namespace BasicEcom.Services
 {
-    // This class is responsible for interacting with the Azure Table Storage service.
+    // Reads and writes customers, products and orders in Azure Table Storage, and handles sign-in.
+    // Adapted from https://learn.microsoft.com/en-us/dotnet/api/azure.data.tables.tableserviceclient?view=azure-dotnet
+    // Adapted from https://learn.microsoft.com/en-us/dotnet/api/azure.data.tables.tableclient?view=azure-dotnet
+    // Adapted from https://www.c-sharpcorner.com/article/net-core-crud-operation-using-azure-table-api/
     public class TableService
     {
-        /*
-         * Code Attribution:
-         * TableServiceClient Class (Azure.Data.Tables) - Azure for .NET Developers
-         * azure-sdk
-         * 30 August 2024
-         * learn.microsoft
-         * https://learn.microsoft.com/en-us/dotnet/api/azure.data.tables.tableserviceclient?view=azure-dotnet
-         */
-        private readonly TableServiceClient _tableServiceClient;
-        /*
-         * Code Attribution:
-         * TableClient Class (Azure.Data.Tables) - Azure for .NET Developers
-         * azure-sdk
-         * 30 August 2024
-         * learn.microsoft
-         * https://learn.microsoft.com/en-us/dotnet/api/azure.data.tables.tableclient?view=azure-dotnet
-         */
+        private static readonly PasswordHasher<Customers> PasswordHasher = new();
+
         private readonly TableClient _customersTableClient;
         private readonly TableClient _productsTableClient;
         private readonly TableClient _ordersTableClient;
 
         public TableService(string connectionString, string customersTableName, string productsTableName, string ordersTableName)
         {
-            _tableServiceClient = new TableServiceClient(connectionString);
+            var tableServiceClient = new TableServiceClient(connectionString);
 
-            _customersTableClient = _tableServiceClient.GetTableClient(customersTableName);
+            _customersTableClient = tableServiceClient.GetTableClient(customersTableName);
             _customersTableClient.CreateIfNotExists();
 
-            _productsTableClient = _tableServiceClient.GetTableClient(productsTableName);
+            _productsTableClient = tableServiceClient.GetTableClient(productsTableName);
             _productsTableClient.CreateIfNotExists();
 
-            _ordersTableClient = _tableServiceClient.GetTableClient(ordersTableName);
+            _ordersTableClient = tableServiceClient.GetTableClient(ordersTableName);
             _ordersTableClient.CreateIfNotExists();
         }
-        /*
-         * Code Attribution:
-         * .NET Core CRUD Operation Using Azure Table API
-         * Sathiyamoorthy S
-         * 21 February 2024
-         * c-sharpcorner
-         * https://www.c-sharpcorner.com/article/net-core-crud-operation-using-azure-table-api/
-         */
-        #region Customers
-        #region CRUD Operations
-        public async Task AddCustomerAsync(Customers profile)
-        {
-            try
-            {
-                await _customersTableClient.AddEntityAsync(profile).ConfigureAwait(false);
-                Debug.WriteLine($"Customer {profile.Name} added successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error adding customer: {ex.Message}");
-                throw new Exception("Error adding customer", ex);
-            }
-        }
 
-        public async Task<Customers> GetCustomerAsync(string partitionKey, string rowKey)
+        #region Customers
+        public Task AddCustomerAsync(Customers customer) =>
+            _customersTableClient.AddEntityAsync(customer);
+
+        public Task<Customers?> FindCustomerAsync(string partitionKey, string rowKey) =>
+            FindAsync<Customers>(_customersTableClient, partitionKey, rowKey);
+
+        public async Task<Customers?> FindCustomerByEmailAsync(string email)
         {
-            try
+            var filter = TableClient.CreateQueryFilter<Customers>(c => c.Email == email);
+            await foreach (var customer in _customersTableClient.QueryAsync<Customers>(filter, maxPerPage: 1))
             {
-                var customer = await _customersTableClient.GetEntityAsync<Customers>(partitionKey, rowKey).ConfigureAwait(false);
-                Debug.WriteLine($"Customer {rowKey} retrieved successfully.");
                 return customer;
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error retrieving customer: {ex.Message}");
-                throw new Exception("Error retrieving customer", ex);
-            }
+            return null;
         }
 
-        public async Task UpdateCustomerAsync(Customers profile)
-        {
-            try
-            {
-                await _customersTableClient.UpdateEntityAsync(profile, profile.ETag, TableUpdateMode.Replace).ConfigureAwait(false);
-                Debug.WriteLine($"Customer {profile.Name} updated successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error updating customer: {ex.Message}");
-                throw new Exception("Error updating customer", ex);
-            }
-        }
+        public Task UpdateCustomerAsync(Customers customer) =>
+            _customersTableClient.UpdateEntityAsync(customer, customer.ETag, TableUpdateMode.Replace);
 
-        public async Task DeleteCustomerAsync(string partitionKey, string rowKey)
-        {
-            try
-            {
-                await _customersTableClient.DeleteEntityAsync(partitionKey, rowKey).ConfigureAwait(false);
-                Debug.WriteLine($"Customer {rowKey} deleted successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error deleting customer: {ex.Message}");
-                throw new Exception("Error deleting customer", ex);
-            }
-        }
+        public Task DeleteCustomerAsync(string partitionKey, string rowKey) =>
+            _customersTableClient.DeleteEntityAsync(partitionKey, rowKey);
 
-        /*
-         * Code Attribution:
-         * TableClient.Query Method (Azure.Data.Tables) - Azure for .NET Developers
-         * azure-sdk
-         * 30 August 2024
-         * learn.microsoft
-         * https://learn.microsoft.com/en-us/dotnet/api/azure.data.tables.tableclient.query?view=azure-dotnet
-         */
-        public async Task<List<Customers>> QueryCustomersAsync(string filter)
-        {
-            List<Customers> customersList = new List<Customers>();
-            try
-            {
-                await Task.Run(() =>
-                {
-                    Pageable<Customers> customers = _customersTableClient.Query<Customers>(filter);
-                    foreach (var customer in customers)
-                    {
-                        customersList.Add(customer);
-                    }
-                }).ConfigureAwait(false);
-                Debug.WriteLine($"Queried {customersList.Count} customers.");
-            }
-            catch (RequestFailedException ex)
-            {
-                Debug.WriteLine($"Error querying customers: {ex.Message}");
-                throw new Exception("Error querying customers", ex);
-            }
-            return customersList;
-        }
+        // Adapted from https://learn.microsoft.com/en-us/dotnet/api/azure.data.tables.tableclient.query?view=azure-dotnet
+        public Task<List<Customers>> QueryCustomersAsync() => QueryAllAsync<Customers>(_customersTableClient);
         #endregion
 
-        /*
-         * Code Attribution:
-         * ASP.NET Core Data Protection Overview
-         * tdykstra
-         * 30 August 2024
-         * learn.microsoft
-         * https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/introduction?view=aspnetcore-8.0
-         */
+        // Adapted from https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/introduction?view=aspnetcore-8.0
         #region Authentication
+        // Returns the customer with a fresh session token when the email and password match, otherwise null.
         public async Task<Customers?> AuthenticateCustomerAsync(string email, string password)
         {
-            try
+            var customer = await FindCustomerByEmailAsync(email).ConfigureAwait(false);
+            if (customer?.PasswordHash == null || !VerifyPassword(customer, password))
             {
-                string escapedEmail = email.Replace("'", "''");
-                string filter = $"Email eq '{escapedEmail}'";
-
-                var customers = _customersTableClient.Query<Customers>(filter);
-                var customer = customers.FirstOrDefault();
-
-                if (customer != null && VerifyPasswordHash(password, customer.PasswordHash!))
-                {
-                    customer.SessionToken = GenerateSessionToken();
-                    customer.LastLogin = DateTimeOffset.UtcNow;
-                    await UpdateCustomerAsync(customer).ConfigureAwait(false);
-                    return customer;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error authenticating customer: {ex.Message}");
-                throw new Exception("Error authenticating customer", ex);
+                return null;
             }
 
-            return null;
+            customer.SessionToken = GenerateSessionToken();
+            customer.LastLogin = DateTimeOffset.UtcNow;
+            await UpdateCustomerAsync(customer).ConfigureAwait(false);
+            return customer;
         }
 
         public async Task LogoutCustomerAsync(string partitionKey, string rowKey)
         {
-            var customer = await GetCustomerAsync(partitionKey, rowKey).ConfigureAwait(false);
+            var customer = await FindCustomerAsync(partitionKey, rowKey).ConfigureAwait(false);
             if (customer != null)
             {
                 customer.SessionToken = null;
                 await UpdateCustomerAsync(customer).ConfigureAwait(false);
             }
         }
-        #endregion
 
-        #region Password Hashing
-        public static string HashPassword(string password)
+        // PBKDF2 with a per-password random salt, via ASP.NET Core Identity's PasswordHasher.
+        public static string HashPassword(Customers customer, string password) =>
+            PasswordHasher.HashPassword(customer, password);
+
+        // Earlier versions stored an unsalted SHA-256 hash. Such a hash is still accepted once and replaced
+        // with a PasswordHasher hash, which AuthenticateCustomerAsync then saves.
+        private static bool VerifyPassword(Customers customer, string password)
         {
-            using var sha256 = SHA256.Create();
-            var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-            return Convert.ToBase64String(hash);
+            PasswordVerificationResult result;
+            try
+            {
+                result = PasswordHasher.VerifyHashedPassword(customer, customer.PasswordHash!, password);
+            }
+            catch (FormatException)
+            {
+                result = PasswordVerificationResult.Failed;
+            }
+            if (result == PasswordVerificationResult.Success)
+            {
+                return true;
+            }
+
+            if (result == PasswordVerificationResult.SuccessRehashNeeded || IsLegacySha256Match(customer.PasswordHash!, password))
+            {
+                customer.PasswordHash = HashPassword(customer, password);
+                return true;
+            }
+
+            return false;
         }
 
-        private bool VerifyPasswordHash(string password, string storedHash)
+        private static bool IsLegacySha256Match(string storedHash, string password)
         {
-            var hash = HashPassword(password);
-            return hash == storedHash;
+            var legacyHash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(password)));
+            return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(legacyHash), Encoding.UTF8.GetBytes(storedHash));
         }
 
-        private string GenerateSessionToken()
-        {
-            return Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-        }
-        #endregion
+        private static string GenerateSessionToken() =>
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
         #endregion
 
         #region Products
-        public async Task AddProductAsync(Products product)
-        {
-            try
-            {
-                await _productsTableClient.AddEntityAsync(product).ConfigureAwait(false);
-                Debug.WriteLine($"Product {product.Name} added successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error adding product: {ex.Message}");
-                throw new Exception("Error adding product", ex);
-            }
-        }
+        public Task AddProductAsync(Products product) =>
+            _productsTableClient.AddEntityAsync(product);
 
-        public async Task<Products> GetProductAsync(string partitionKey, string rowKey)
-        {
-            try
-            {
-                var product = await _productsTableClient.GetEntityAsync<Products>(partitionKey, rowKey).ConfigureAwait(false);
-                Debug.WriteLine($"Product {rowKey} retrieved successfully.");
-                return product;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error retrieving product: {ex.Message}");
-                throw new Exception("Error retrieving product", ex);
-            }
-        }
+        public Task<Products?> FindProductAsync(string partitionKey, string rowKey) =>
+            FindAsync<Products>(_productsTableClient, partitionKey, rowKey);
 
-        public async Task UpdateProductAsync(Products product)
-        {
-            try
-            {
-                await _productsTableClient.UpdateEntityAsync(product, product.ETag, TableUpdateMode.Replace).ConfigureAwait(false);
-                Debug.WriteLine($"Product {product.Name} updated successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error updating product: {ex.Message}");
-                throw new Exception("Error updating product", ex);
-            }
-        }
+        public Task UpdateProductAsync(Products product) =>
+            _productsTableClient.UpdateEntityAsync(product, product.ETag, TableUpdateMode.Replace);
 
-        public async Task DeleteProductAsync(string partitionKey, string rowKey)
-        {
-            try
-            {
-                await _productsTableClient.DeleteEntityAsync(partitionKey, rowKey).ConfigureAwait(false);
-                Debug.WriteLine($"Product {rowKey} deleted successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error deleting product: {ex.Message}");
-                throw new Exception("Error deleting product", ex);
-            }
-        }
+        public Task DeleteProductAsync(string partitionKey, string rowKey) =>
+            _productsTableClient.DeleteEntityAsync(partitionKey, rowKey);
 
-        public async Task<List<Products>> QueryProductsAsync(string filter)
-        {
-            List<Products> productsList = new List<Products>();
-            try
-            {
-                await Task.Run(() =>
-                {
-                    Pageable<Products> products = _productsTableClient.Query<Products>(filter);
-                    foreach (var product in products)
-                    {
-                        productsList.Add(product);
-                    }
-                }).ConfigureAwait(false);
-                Debug.WriteLine($"Queried {productsList.Count} products.");
-            }
-            catch (RequestFailedException ex)
-            {
-                Debug.WriteLine($"Error querying products: {ex.Message}");
-                throw new Exception("Error querying products", ex);
-            }
-            return productsList;
-        }
+        public Task<List<Products>> QueryProductsAsync() => QueryAllAsync<Products>(_productsTableClient);
         #endregion
 
         #region Orders
-        public async Task AddOrderAsync(Orders order)
-        {
-            try
-            {
-                await _ordersTableClient.AddEntityAsync(order).ConfigureAwait(false);
-                Debug.WriteLine($"Order {order.RowKey} added successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error adding order: {ex.Message}");
-                throw new Exception("Error adding order", ex);
-            }
-        }
+        public Task AddOrderAsync(Orders order) =>
+            _ordersTableClient.AddEntityAsync(order);
 
-        public async Task<Orders> GetOrderAsync(string partitionKey, string rowKey)
-        {
-            try
-            {
-                var order = await _ordersTableClient.GetEntityAsync<Orders>(partitionKey, rowKey).ConfigureAwait(false);
-                Debug.WriteLine($"Order {rowKey} retrieved successfully.");
-                return order;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error retrieving order: {ex.Message}");
-                throw new Exception("Error retrieving order", ex);
-            }
-        }
+        public Task<Orders?> FindOrderAsync(string partitionKey, string rowKey) =>
+            FindAsync<Orders>(_ordersTableClient, partitionKey, rowKey);
 
-        public async Task UpdateOrderAsync(Orders order)
-        {
-            try
-            {
-                await _ordersTableClient.UpdateEntityAsync(order, order.ETag, TableUpdateMode.Replace).ConfigureAwait(false);
-                Debug.WriteLine($"Order {order.RowKey} updated successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error updating order: {ex.Message}");
-                throw new Exception("Error updating order", ex);
-            }
-        }
+        public Task UpdateOrderAsync(Orders order) =>
+            _ordersTableClient.UpdateEntityAsync(order, order.ETag, TableUpdateMode.Replace);
 
-        public async Task DeleteOrderAsync(string partitionKey, string rowKey)
-        {
-            try
-            {
-                await _ordersTableClient.DeleteEntityAsync(partitionKey, rowKey).ConfigureAwait(false);
-                Debug.WriteLine($"Order {rowKey} deleted successfully.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error deleting order: {ex.Message}");
-                throw new Exception("Error deleting order", ex);
-            }
-        }
+        public Task DeleteOrderAsync(string partitionKey, string rowKey) =>
+            _ordersTableClient.DeleteEntityAsync(partitionKey, rowKey);
 
-        public async Task<List<Orders>> QueryOrdersAsync(string filter)
-        {
-            List<Orders> ordersList = new List<Orders>();
-            try
-            {
-                await Task.Run(() =>
-                {
-                    Pageable<Orders> orders = _ordersTableClient.Query<Orders>(filter);
-                    foreach (var order in orders)
-                    {
-                        ordersList.Add(order);
-                    }
-                }).ConfigureAwait(false);
-                Debug.WriteLine($"Queried {ordersList.Count} orders.");
-            }
-            catch (RequestFailedException ex)
-            {
-                Debug.WriteLine($"Error querying orders: {ex.Message}");
-                throw new Exception("Error querying orders", ex);
-            }
-            return ordersList;
-        }
+        public Task<List<Orders>> QueryOrdersAsync() => QueryAllAsync<Orders>(_ordersTableClient);
         #endregion
+
+        private static async Task<T?> FindAsync<T>(TableClient table, string partitionKey, string rowKey)
+            where T : class, ITableEntity, new()
+        {
+            if (string.IsNullOrEmpty(partitionKey) || string.IsNullOrEmpty(rowKey))
+            {
+                return null;
+            }
+
+            NullableResponse<T> response = await table.GetEntityIfExistsAsync<T>(partitionKey, rowKey).ConfigureAwait(false);
+            return response.HasValue ? response.Value : null;
+        }
+
+        private static async Task<List<T>> QueryAllAsync<T>(TableClient table)
+            where T : class, ITableEntity, new()
+        {
+            var results = new List<T>();
+            await foreach (var entity in table.QueryAsync<T>().ConfigureAwait(false))
+            {
+                results.Add(entity);
+            }
+            return results;
+        }
     }
 }

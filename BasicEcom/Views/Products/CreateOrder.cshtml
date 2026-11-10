@@ -7,6 +7,7 @@
 <h2>@ViewData["Title"]</h2>
 
 <form asp-action="CreateOrder" method="post">
+    <div asp-validation-summary="All" class="text-danger"></div>
     <input type="hidden" name="ProductPartitionKey" value="@Model.ProductPartitionKey" />
     <input type="hidden" name="ProductRowKey" value="@Model.ProductRowKey" />
     <div class="form-group">

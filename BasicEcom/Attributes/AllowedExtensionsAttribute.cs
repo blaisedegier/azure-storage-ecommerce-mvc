@@ -1,17 +1,10 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
-/*
- * Code Attribution:
- * Add server side validation for uploaded files
- * muhammadelhelaly
- * 26 August 2023
- * GitHub
- * https://github.com/muhammadelhelaly/GameZone/blob/master/GameZone/Attributes/AllowedExtensionsAttribute.cs
- */
+// Adapted from https://github.com/muhammadelhelaly/GameZone/blob/master/GameZone/Attributes/AllowedExtensionsAttribute.cs
 namespace BasicEcom.Attributes
 {
     // This class is used to validate the file extension of the uploaded file.
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, AllowMultiple = false)]
     public class AllowedExtensionsAttribute : ValidationAttribute
     {
         private readonly string[] _extensions;
