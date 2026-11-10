@@ -8,6 +8,15 @@ namespace BasicEcom.Controllers
 {
     public class ProductsController : Controller
     {
+        // Product images are stored and served with the content type that matches their extension, never the
+        // type the browser sent with the upload. Keep this in step with [AllowedExtensions] on Create.
+        private static readonly Dictionary<string, string> ImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".jpg"] = "image/jpeg",
+            [".jpeg"] = "image/jpeg",
+            [".png"] = "image/png",
+        };
+
         private readonly TableService _tableService;
         private readonly QueueService _queueService;
         private readonly BlobService _blobService;
@@ -56,8 +65,19 @@ namespace BasicEcom.Controllers
                 return NotFound();
             }
 
+            if (!ImageContentTypes.TryGetValue(Path.GetExtension(product.ImageUrl), out var contentType))
+            {
+                return NotFound();
+            }
+
             var blob = await _blobService.DownloadBlobAsync(product.ImageUrl);
-            return blob == null ? NotFound() : File(blob.Value.Content, blob.Value.ContentType);
+            if (blob == null)
+            {
+                return NotFound();
+            }
+
+            Response.Headers.XContentTypeOptions = "nosniff";
+            return File(blob.Value.Content, contentType);
         }
 
         #region CRUD Operations
@@ -71,7 +91,7 @@ namespace BasicEcom.Controllers
         // POST: Products/Create
         [HttpPost]
         [AdminAuthorize]
-        public async Task<IActionResult> Create([Bind("ProductID,Name,Description,Price")] Products product,
+        public async Task<IActionResult> Create([Bind("Name,Description,Price")] Products product,
             [AllowedExtensions(new[] { ".jpg", ".jpeg", ".png" })] IFormFile? imageFile)
         {
             if (!ModelState.IsValid)
@@ -81,15 +101,17 @@ namespace BasicEcom.Controllers
 
             product.PartitionKey = "Sneaker";
             product.RowKey = Guid.NewGuid().ToString();
-            product.ProductID ??= product.RowKey;
+            product.ProductID = product.RowKey;
 
             // The image is stored under a generated name; ImageUrl holds that blob name.
             if (imageFile != null && imageFile.Length > 0)
             {
-                string blobName = $"{product.RowKey}{Path.GetExtension(imageFile.FileName).ToLowerInvariant()}";
+                // [AllowedExtensions] has already rejected any other extension.
+                string extension = Path.GetExtension(imageFile.FileName).ToLowerInvariant();
+                string blobName = $"{product.RowKey}{extension}";
                 using (var stream = imageFile.OpenReadStream())
                 {
-                    await _blobService.UploadBlobAsync(blobName, stream, imageFile.ContentType);
+                    await _blobService.UploadBlobAsync(blobName, stream, ImageContentTypes[extension]);
                 }
                 product.ImageUrl = blobName;
             }
@@ -180,9 +202,9 @@ namespace BasicEcom.Controllers
 
         #region Order
         // GET: Products/CreateOrder
-        public IActionResult CreateOrder(string partitionKey, string rowKey)
+        public async Task<IActionResult> CreateOrder(string partitionKey, string rowKey)
         {
-            if (string.IsNullOrEmpty(HttpContext.Session.GetString("SessionToken")))
+            if (await SessionAuth.GetSignedInCustomerAsync(HttpContext, _tableService) == null)
             {
                 return RedirectToAction("Login", "Customers");
             }
@@ -195,9 +217,8 @@ namespace BasicEcom.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateOrder([Bind("ProductPartitionKey,ProductRowKey,Size,Quantity,Colour")] OrderViewModel orderVM)
         {
-            var customerPartitionKey = HttpContext.Session.GetString("PartitionKey");
-            var customerRowKey = HttpContext.Session.GetString("RowKey");
-            if (string.IsNullOrEmpty(customerPartitionKey) || string.IsNullOrEmpty(customerRowKey))
+            var customer = await SessionAuth.GetSignedInCustomerAsync(HttpContext, _tableService);
+            if (customer == null)
             {
                 return RedirectToAction("Login", "Customers");
             }
@@ -207,9 +228,8 @@ namespace BasicEcom.Controllers
                 return View(orderVM);
             }
 
-            var customer = await _tableService.FindCustomerAsync(customerPartitionKey, customerRowKey);
             var product = await _tableService.FindProductAsync(orderVM.ProductPartitionKey ?? "", orderVM.ProductRowKey ?? "");
-            if (customer == null || product == null)
+            if (product == null)
             {
                 return NotFound();
             }

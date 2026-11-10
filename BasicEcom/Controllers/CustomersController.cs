@@ -65,7 +65,7 @@ namespace BasicEcom.Controllers
         }
 
         // POST: Customers/Edit - updates contact details only; the password, admin flag and session are
-        // read from the stored record, never from the form.
+        // read from the stored record, never from the form. The email must not belong to another customer.
         [HttpPost]
         [AdminAuthorize]
         public async Task<IActionResult> Edit(string partitionKey, string rowKey, [Bind("PartitionKey,RowKey,Name,Email,Phone,Address")] Customers input)
@@ -86,6 +86,13 @@ namespace BasicEcom.Controllers
             if (customer == null)
             {
                 return NotFound();
+            }
+
+            var emailOwner = await _tableService.FindCustomerByEmailAsync(input.Email!);
+            if (emailOwner != null && emailOwner.RowKey != customer.RowKey)
+            {
+                ModelState.AddModelError(nameof(Customers.Email), "An account with this email already exists.");
+                return View(input);
             }
 
             customer.Name = input.Name;
@@ -151,12 +158,10 @@ namespace BasicEcom.Controllers
 
             await _queueService.EnqueueMessageAsync(new { Action = "Login", Description = $"Customer {customer.Name} logged in." });
 
+            // AuthenticateCustomerAsync has stored a new session token on the customer record. SignIn clears the
+            // session and copies that token into it, which also ends any session signed in before this one.
             // Adapted from https://bencull.com/blog/using-sessions-and-httpcontext-in-aspnetcore-and-mvc-core
-            HttpContext.Session.SetString("SessionToken", customer.SessionToken!);
-            HttpContext.Session.SetString("CustomerName", customer.Name!);
-            HttpContext.Session.SetString("PartitionKey", customer.PartitionKey!);
-            HttpContext.Session.SetString("RowKey", customer.RowKey!);
-            HttpContext.Session.SetString("isAdmin", customer.isAdmin.ToString());
+            SessionAuth.SignIn(HttpContext.Session, customer);
             return RedirectToAction("Index", "Home");
         }
 
@@ -164,16 +169,13 @@ namespace BasicEcom.Controllers
         [HttpPost]
         public async Task<IActionResult> Logout()
         {
-            var partitionKey = HttpContext.Session.GetString("PartitionKey");
-            var rowKey = HttpContext.Session.GetString("RowKey");
-            if (!string.IsNullOrEmpty(partitionKey) && !string.IsNullOrEmpty(rowKey))
+            // Only a session whose token is still current clears the stored token, so signing out of an
+            // older, already-replaced session does not end the customer's newer one.
+            var customer = await SessionAuth.GetSignedInCustomerAsync(HttpContext, _tableService);
+            if (customer != null)
             {
-                var customer = await _tableService.FindCustomerAsync(partitionKey, rowKey);
-                if (customer != null)
-                {
-                    await _queueService.EnqueueMessageAsync(new { Action = "Logout", Description = $"Customer {customer.Name} logged out." });
-                    await _tableService.LogoutCustomerAsync(partitionKey, rowKey);
-                }
+                await _queueService.EnqueueMessageAsync(new { Action = "Logout", Description = $"Customer {customer.Name} logged out." });
+                await _tableService.LogoutCustomerAsync(customer.PartitionKey!, customer.RowKey!);
             }
 
             HttpContext.Session.Clear();
