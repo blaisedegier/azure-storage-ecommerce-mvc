@@ -1,6 +1,6 @@
 # Sneaker Store
 
-An ASP.NET Core 8 MVC shop that keeps all of its data in Azure Storage: Table Storage for records, Blob Storage for product images, Queue Storage for an activity log and a File Share for PDF invoices.
+An ASP.NET Core 10 MVC shop that keeps all of its data in Azure Storage: Table Storage for records, Blob Storage for product images, Queue Storage for an activity log and a File Share for PDF invoices.
 
 [![CI](https://github.com/blaisedegier/azure-storage-ecommerce-mvc/actions/workflows/ci.yml/badge.svg)](https://github.com/blaisedegier/azure-storage-ecommerce-mvc/actions/workflows/ci.yml)
 
@@ -56,7 +56,7 @@ Decisions worth knowing about:
 
 ## Running it
 
-Prerequisites: the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and
+Prerequisites: the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and
 [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite) (for example
 `npm install -g azurite`), or an Azure Storage account.
 
@@ -87,7 +87,7 @@ paid licence.
 
 ## Tech
 
-ASP.NET Core 8 MVC, Azure.Data.Tables, Azure.Storage.Blobs, Azure.Storage.Queues,
+ASP.NET Core 10 MVC (.NET 10), Azure.Data.Tables, Azure.Storage.Blobs, Azure.Storage.Queues,
 Azure.Storage.Files.Shares, QuestPDF, Bootstrap 5.
 
 ## Known limitations
