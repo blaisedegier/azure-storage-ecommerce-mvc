@@ -101,3 +101,7 @@ Azure.Storage.Files.Shares, QuestPDF, Bootstrap 5.
 - Listing pages read whole tables with no paging.
 - Prices are stored as `double`, and the admin order form takes customer and product IDs as typed text.
 - There are no automated tests.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
